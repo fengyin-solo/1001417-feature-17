@@ -12,7 +12,7 @@ router = APIRouter(prefix="/api/material", tags=["养护材料"])
 
 service = MaterialService()
 
-LIST_FIELDS = ["材料编号", "材料名称", "规格型号", "结存数量", "计量单位", "存放场地", "保管人员", "材料状态"]
+LIST_FIELDS = ["材料编号", "材料名称", "规格型号", "结存数量", "储备下限", "计量单位", "存放场地", "保管人员", "材料状态"]
 STATUSES = ["正常可用", "临近不足", "已冻结", "已耗尽"]
 
 
@@ -30,6 +30,19 @@ def list_entries(
     return PageResult(items=items, total=total, page=page, size=size)
 
 
+@router.get("/summary")
+def summary() -> dict[str, int]:
+    """看板统计：可用材料、储备不足材料、已冻结材料与材料总数，与列表去重口径一致。"""
+    return service.summary()
+
+
+@router.get("/export")
+def export_entries() -> dict[str, Any]:
+    """导出养护材料清单：返回当前过滤条件下的全量数据。"""
+    items, total = service.list_entries(page=1, size=10000)
+    return {"module": "material", "total": total, "items": items}
+
+
 @router.get("/{entry_id}", response_model=dict)
 def get_entry(entry_id: int) -> dict:
     """读取单条养护材料明细；不存在时给出可读的错误说明。"""
@@ -41,10 +54,10 @@ def get_entry(entry_id: int) -> dict:
 
 @router.post("", response_model=ActionResult)
 def create_entry(payload: EntryPayload) -> ActionResult:
-    """登记一条养护材料，缺字段时说明原因而不是静默丢弃。"""
-    entry, missing = service.create_entry(payload.values)
-    if missing:
-        return ActionResult(ok=False, message=f"缺少必填字段：{'、'.join(missing)}")
+    """登记一条养护材料；结存数量为空、为零或为负数时不允许按正常可用入库，并指明是哪一项不合规。"""
+    entry, problems = service.create_entry(payload.values)
+    if problems:
+        return ActionResult(ok=False, message="；".join(problems))
     return ActionResult(ok=True, message="养护材料已登记", entry=entry)
 
 
@@ -56,10 +69,3 @@ def run_action(entry_id: int, payload: EntryPayload) -> ActionResult:
     if entry is None:
         return ActionResult(ok=False, message=message)
     return ActionResult(ok=True, message=message, entry=entry)
-
-
-@router.get("/export")
-def export_entries() -> dict[str, Any]:
-    """导出养护材料清单：返回当前过滤条件下的全量数据。"""
-    items, total = service.list_entries(page=1, size=10000)
-    return {"module": "material", "total": total, "items": items}
